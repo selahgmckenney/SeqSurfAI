@@ -1,0 +1,317 @@
+---
+title: "SeqSurf AI"
+subtitle: "Paper-grounded transcriptomic reanalysis for healthcare AI"
+author: "Selah McKenney"
+date: "2026-06-24"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    theme: cosmo
+    embed-resources: true
+    fig-width: 10
+    fig-height: 6
+    code-fold: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{css}
+body {
+  color: #18243a;
+}
+
+.hero {
+  border-left: 8px solid #0f8c8f;
+  padding: 1.2rem 1.4rem;
+  margin: 1rem 0 1.4rem 0;
+  background: #f3fbfb;
+}
+
+.hero h2 {
+  margin-top: 0;
+}
+
+.callout-box {
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  margin: 1rem 0;
+  background: #ffffff;
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.metric {
+  border-left: 5px solid #2f80ed;
+  background: #f7fbff;
+}
+
+.warning {
+  border-left: 5px solid #c47f00;
+  background: #fffaf0;
+}
+
+.success {
+  border-left: 5px solid #2f8f46;
+  background: #f4fbf5;
+}
+
+img {
+  border: 1px solid #d8dee8;
+  border-radius: 8px;
+}
+
+@media (max-width: 800px) {
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+```
+
+<div class="hero">
+
+## Goal
+
+**SeqSurf AI is designed to make public transcriptomic reanalysis easier, more reproducible, and more comparable across studies.** The long-term goal is a standardized AI-assisted workflow where a user can enter a GEO accession, understand what has already been done with the dataset, decide whether reanalysis is worthwhile, reproduce or approximate prior findings, and then receive better next-analysis recommendations.
+
+</div>
+
+## Healthcare AI Niche
+
+Modern biomedical research produces enormous public sequencing and expression datasets. The problem is not only access. The harder problem is consistency: different groups reuse GEO datasets with different preprocessing choices, different phenotype definitions, different contrasts, and different levels of paper-grounded validation. That makes conclusions difficult to compare.
+
+SeqSurf AI targets the gap between a literature summarizer and a full bioinformatics pipeline. A general AI assistant can summarize papers, and a workflow manager can run code, but neither one usually enforces a reproducible analysis contract that connects:
+
+- the public dataset,
+- the original paper and claims,
+- the available expression or count data,
+- the selected contrast,
+- the reanalysis results,
+- the reproducibility score,
+- the known pitfalls,
+- and the next scientifically useful analysis.
+
+SeqSurf AI is intended to fill that niche: **an AI-guided reproducibility layer for public transcriptomic datasets.**
+
+## Problem, Gap, Solution
+
+| Area | Summary |
+|---|---|
+| Problem | Everyone sequences, but public transcriptomic conclusions are hard to compare. |
+| Gap | GEO datasets are reused inconsistently; AI tools can summarize papers but do not enforce reproducible analysis contracts. |
+| Solution | SeqSurf AI standardizes dataset triage, paper-grounded reanalysis, claim validation, and adaptive learning. |
+| Demo case | `GSE19804`, a public lung cancer expression dataset, is the main prepared demo dataset. |
+| Evaluation | Show workflow completion, route classification, generated reanalysis score, paper-claim comparison, and standardized pitfall surfacing. |
+
+## What The App Does Today
+
+SeqSurf AI currently behaves like a guided research assistant wrapped around a Shiny analysis app. The user starts with a GEO accession or an uploaded dataset. The app then decides what kind of analysis route is realistic.
+
+```{r}
+knitr::include_graphics("/Users/selahmckenney/Desktop/01_ACTIVE/AI in healthcare/Figures/00_seqsurf_ai_workflow_figure.png")
+```
+
+**Figure 1.** SeqSurf AI workflow. The app moves from dataset triage to study memory, reanalysis, paper agreement, scoring, and discovery.
+
+### 1. Enter A GEO Accession
+
+The user enters a GEO accession such as `GSE19804`. SeqSurf AI retrieves or loads study context and assesses whether the dataset can be analyzed in-app.
+
+```{r}
+knitr::include_graphics("/Users/selahmckenney/Desktop/01_ACTIVE/AI in healthcare/Figures/01_seqsurf_start_assess.png")
+```
+
+### 2. Classify The Route
+
+Not every GEO dataset is equally ready for reanalysis. SeqSurf AI separates datasets into practical routes:
+
+- **In-app processed-matrix reanalysis:** expression data and phenotype metadata are available enough to analyze directly.
+- **Count-matrix import:** count-like files are present and can be converted into the app contract.
+- **External raw/SRA workflow:** raw sequencing data likely requires an external pipeline before SeqSurf can analyze the expression matrix.
+- **Not ready:** missing or ambiguous files, metadata, or phenotype definitions need user review.
+
+This route classification matters because it prevents the app from pretending that every accession is immediately analyzable.
+
+```{r}
+knitr::include_graphics("/Users/selahmckenney/Desktop/01_ACTIVE/AI in healthcare/Figures/04_seqsurf_analyzability_route.png")
+```
+
+### 3. Build Paper-Grounded Study Memory
+
+SeqSurf AI is not only analyzing numbers. It also builds a study memory: methods, claims, relevant paper excerpts, uncertainty, citation evidence, and notes that help determine what the reanalysis should test.
+
+```{r}
+knitr::include_graphics("/Users/selahmckenney/Desktop/01_ACTIVE/AI in healthcare/Figures/02_seqsurf_train_study_memory.png")
+```
+
+The intended training signal is structured:
+
+| Input | Label | Output Target |
+|---|---|---|
+| GEO metadata, route, paper claims, methods, result summaries | useful/not useful, reproduced/failed, best next analysis, pitfalls | ideal recommendation, score, warning, or signature plan |
+
+### 4. Reanalyze And Validate Against The Paper
+
+After the app has a dataset and a proposed design, it can run the standardized in-app analysis path. For a processed expression dataset, this includes PCA, DEG-style result exploration, volcano plots, heatmaps, pathway summaries, paper-claim comparison, and a reproducibility score.
+
+```{r}
+knitr::include_graphics("/Users/selahmckenney/Desktop/01_ACTIVE/AI in healthcare/Figures/03_seqsurf_validate_report.png")
+```
+
+For the `GSE19804` demo, the app uses a prepared local processed-expression dataset at:
+
+`SeqSurf_AI/data/geo_gse19804`
+
+That means the live demo does **not** need to download FASTQ/SRA files or run alignment. Instead, it demonstrates the intended analysis contract on a cached GEO expression dataset so the presentation is fast and reliable.
+
+### 5. Score Reproducibility And Surface Differences
+
+The score step compares app results to extracted paper claims. The goal is not to declare the original paper right or wrong with a single number. The goal is to provide a structured reproducibility view:
+
+- Which paper claims appear supported by the reanalysis?
+- Which claims are different, incomplete, or not testable with the current app dataset?
+- Which metadata or design choices could explain differences?
+- Which findings are relevant enough to follow up?
+
+### 6. Recommend Discovery Analyses
+
+After validation, SeqSurf AI can recommend next analyses. This is where the app becomes more than a reproduction tool. It can suggest modern reanalysis ideas such as:
+
+- alternative contrasts,
+- batch and covariate checks,
+- cell-state or signature screens,
+- pathway-level interpretation,
+- phenotype refinement,
+- external validation datasets,
+- and standardized pitfall checks.
+
+```{r}
+knitr::include_graphics("/Users/selahmckenney/Desktop/01_ACTIVE/AI in healthcare/Figures/05_seqsurf_discovery_next_analyses.png")
+```
+
+## Current Demo Dataset: GSE19804
+
+`GSE19804` is the main demo case because it supports the app's core story: enter a public accession, classify the route, load prepared expression data, reanalyze, compare to paper claims, and show discovery recommendations.
+
+| Demo Feature | Status |
+|---|---|
+| GEO accession input | Available |
+| Study context loading | Available, with local cache for demo speed |
+| Route classification | Available |
+| Prepared expression dataset | Available locally |
+| PCA and exploratory plots | Available |
+| DEG result exploration | Available |
+| Paper-claim comparison | Available |
+| Reproducibility score | Available |
+| Discovery recommendations | Available |
+| Raw FASTQ/SRA processing | External handoff, not run inside the live demo |
+
+## What The Demo Proves
+
+The demo is strongest if presented as a reproducibility and workflow-standardization prototype, not as a finished autonomous sequencing platform.
+
+<div class="grid-2">
+
+<div class="callout-box success">
+
+### Demonstrated
+
+- GEO accession to study triage.
+- In-app route classification.
+- Cached paper-aware study memory.
+- Prepared expression reanalysis.
+- PCA, DEG, volcano, heatmap, and pathway views.
+- Paper-claim comparison.
+- Reproducibility score.
+- Discovery recommendations.
+- Training-data export structure for future model development.
+
+</div>
+
+<div class="callout-box warning">
+
+### Not Yet Fully Automated
+
+- End-to-end FASTQ download and alignment inside the app.
+- Fully autonomous external workflow execution.
+- True fine-tuned SeqSurf-specific ML model.
+- Shared/global learning backend with consent controls and server infrastructure.
+- Prospective clinical validation.
+
+</div>
+
+</div>
+
+## The Standardized Analysis Contract
+
+SeqSurf AI is built around a simple idea: public dataset reuse should leave behind a structured record. Each dataset interaction should answer the same questions.
+
+| Contract Element | Question |
+|---|---|
+| Dataset identity | What accession, organism, assay, and sample count are being analyzed? |
+| Route | Can the app analyze it directly, import counts, or does it need external raw-data processing? |
+| Evidence | What papers, methods, and claims define the expected result? |
+| Design | Which group column, contrast, covariates, and filtering rules were used? |
+| Reanalysis | What results did the standardized app workflow produce? |
+| Agreement | Which claims were reproduced, different, or not testable? |
+| Score | How strong is the post-analysis reproducibility signal? |
+| Pitfalls | What metadata, batch, tissue, cell-type, or platform issues must be checked? |
+| Next step | What analysis would be most useful now? |
+
+This contract is the foundation for future learning. If many analyses are captured in a consistent structure, the system can eventually learn which dataset features predict useful reanalysis, which pitfalls matter most, and which analysis routes are likely to succeed.
+
+## Adaptive Learning Goal
+
+The long-term product goal is a SeqSurf-specific smart model. The model would not replace scientific judgment. It would improve recommendations by learning from many structured dataset interactions.
+
+The intended learning loop is:
+
+1. A user analyzes a dataset.
+2. SeqSurf records the route, claims, methods, analysis design, result agreement, score, pitfalls, and chosen next steps.
+3. The user can export private local training examples.
+4. With consent, privacy-preserving summaries can contribute to shared/global learning.
+5. Future recommendations become more accurate for similar datasets, platforms, diseases, contrasts, and signatures.
+
+Examples of future learned recommendations:
+
+- "This GEO dataset is likely worth reanalysis because similar processed-matrix lung cancer datasets often reproduce core tumor-normal markers but reveal batch-sensitive immune signatures."
+- "This dataset should not be used for epithelial signature claims until tissue source and sample labels are reconciled."
+- "Use pathway-level analysis before individual-gene claims because related datasets showed unstable single-gene rankings."
+
+## Evaluation Plan
+
+For a healthcare AI paper or demo, evaluation should focus on workflow behavior and reproducibility structure before making clinical claims.
+
+| Evaluation Area | Example Evidence |
+|---|---|
+| Workflow completion | Can a user move from GEO accession to report without manual code edits? |
+| Route classification | Does the app correctly separate processed matrix, count matrix, raw/SRA handoff, and not-ready datasets? |
+| Paper grounding | Does the study memory capture methods, claims, uncertainty, and citation evidence? |
+| Reanalysis validity | Does the app generate PCA, differential expression views, pathway views, and report artifacts? |
+| Claim agreement | Are paper claims compared against app results in a structured table? |
+| Reproducibility scoring | Does the app produce a transparent score with rationale, not just a black-box number? |
+| Pitfall surfacing | Does the app flag common issues such as phenotype ambiguity, batch effects, platform mismatch, and weak contrast definitions? |
+| Learning readiness | Can interactions be exported as structured examples for a future SeqSurf-specific model? |
+
+## Suggested Demo Script
+
+1. Open SeqSurf AI.
+2. Enter `GSE19804`.
+3. Show the Start page and explain the route classification.
+4. Move to Train and show the study memory.
+5. Move to Validate and show the design, report, paper agreement, and score.
+6. Open PCA Explorer and show that the app creates standard exploratory views.
+7. Move to Discovery and show next-analysis recommendations and pitfalls.
+8. Close with the training-data export and adaptive-learning roadmap.
+
+## Plain-Language Pitch
+
+SeqSurf AI is a reproducibility assistant for public transcriptomic data. It helps researchers go from a GEO accession to a paper-grounded reanalysis plan, then checks whether the app's standardized analysis supports or differs from published findings. Its long-term purpose is to make public sequencing reuse more consistent, more transparent, and eventually smarter as the system learns from each dataset analyzed.

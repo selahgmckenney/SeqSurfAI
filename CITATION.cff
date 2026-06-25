@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use SeqSurf AI, please cite this software repository."
+title: "SeqSurf AI"
+authors:
+  - family-names: "McKenney"
+    given-names: "Selah"
+date-released: "2026-06-25"
+version: "0.1.0"
+repository-code: "https://github.com/OWNER/SeqSurf-AI"
+abstract: "SeqSurf AI is a Shiny prototype for paper-grounded transcriptomic reanalysis, GEO dataset triage, reproducibility scoring, and adaptive learning from public dataset reuse."
+keywords:
+  - transcriptomics
+  - GEO
+  - reproducibility
+  - healthcare AI
+  - Shiny
+license: "NOASSERTION"
+

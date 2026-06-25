@@ -1,0 +1,24 @@
+.DS_Store
+.Rhistory
+.RData
+.Ruserdata
+.Renviron
+
+# Local/private runtime state
+data/ai_learning/
+data/external_workflows/
+
+# Downloaded papers and private study text can contain copyrighted or unpublished material.
+data/ai_knowledge_base/*/documents/
+data/ai_knowledge_base/*/paperqa/
+
+# Generated archives/reports
+*.zip
+*.tar.gz
+*.log
+
+# Quarto/R generated intermediates
+*_files/
+*.knit.md
+/.quarto/
+
