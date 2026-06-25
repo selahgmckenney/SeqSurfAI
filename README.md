@@ -33,10 +33,10 @@ workflow and return import-ready files.
      file triage.
    - Classify whether the study can run in-app, needs a count-matrix pipeline,
      needs a raw sequencing pipeline, or requires manual curation.
-   - Send the study to Train or Validate.
+   - Send the study to Prepare Evidence or Validate.
 
-2. Train
-   - Train study memory from GEO/PubMed, related papers mentioning the GEO
+2. Prepare Evidence
+   - Build study memory from GEO/PubMed, related papers mentioning the GEO
      accession, and optional user-provided text.
    - Fetch paper-like PDFs/HTML when available.
    - Extract structured publication claims from the study context.
@@ -121,17 +121,16 @@ From this folder:
 shiny::runApp()
 ```
 
-Or from another R session:
+Or navigate to the cloned directory first:
 
 ```r
-setwd("/Users/selahmckenney/Desktop/01_ACTIVE/Apps/SeqSurf_AI")
+setwd("path/to/SeqSurf_AI")
 shiny::runApp()
 ```
 
 Recommended local run:
 
 ```r
-setwd("SeqSurf_AI")
 shiny::runApp(host = "127.0.0.1", port = 4248)
 ```
 
@@ -157,7 +156,7 @@ Core app packages are checked at startup. GEO/AI features also benefit from:
 OpenAI-backed extraction/chat requires an API key pasted into the app or set as
 `OPENAI_API_KEY`. In the app, paste the key once in the global sidebar and click
 `Save key for session`; SeqSurf AI keeps it in Shiny session memory for Start,
-Train, Validate, and Discovery actions. The key is not written to
+Prepare Evidence, Validate, and Discovery actions. The key is not written to
 project files.
 
 ## Installation Notes
