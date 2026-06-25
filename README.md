@@ -17,8 +17,6 @@ contrasts, and validation standards vary across studies. SeqSurf AI is designed
 as a reproducibility layer between public repositories, papers, and exploratory
 bioinformatics workflows.
 
-![SeqSurf AI interface](docs/screenshots/00_current_app_view.png)
-
 ## Why This Exists
 
 | Problem | SeqSurf AI response |
@@ -203,4 +201,3 @@ For manuscript text:
 Source code for SeqSurf AI is available at
 https://github.com/selahgmckenney/SeqSurfAI.
 ```
-
