@@ -277,6 +277,7 @@ ui <- page_navbar(
         conditionalPanel(
           "input.start_input_mode == 'geo'",
           textInput("start_geo_accession", "GEO accession", value = "", placeholder = "e.g. GSE19804"),
+          actionButton("start_load_demo", "Load local demo", icon = icon("bolt"), class = "btn-outline-primary"),
           textAreaInput(
             "start_own_dataset_notes",
             "Relevant paper/method notes",
@@ -321,11 +322,11 @@ ui <- page_navbar(
             )
           )
         ),
+        card(card_header(info_title("Data Quality Signals", "RIN score detection, sample count, expression matrix availability, and PCA-based outlier screening to inform whether this dataset is suitable for reanalysis.")), uiOutput("data_quality_signals_panel")),
         card(
           card_header(info_title("Can SeqSurf Analyze This In-App?", "First-pass route classifier: processed-matrix in-app analysis, count-matrix path, raw-data handoff, or manual curation.")),
           uiOutput("geo_analyzability_route_summary")
         ),
-        card(card_header(info_title("Data Quality Signals", "RIN score detection, sample count, expression matrix availability, and PCA-based outlier screening to inform whether this dataset is suitable for reanalysis.")), DTOutput("data_quality_signals_table")),
         card(
           card_header(info_title("Dataset Snapshot", "Compact description of the imported study: organism, assay type, sample count, metadata, expression files, and paper context.")),
           uiOutput("start_study_snapshot")
@@ -663,9 +664,15 @@ ui <- page_navbar(
         actionButton("run_comparison", "Compare datasets", icon = icon("code-compare"), class = "btn-primary"),
         helpText("Select two datasets that have completed reanalysis to compare DEG overlap, pathway agreement, and claimed biomarkers.")
       ),
-      card(card_header(info_title("DEG Overlap", "Genes significant in both datasets at padj < 0.05.")), DTOutput("compare_deg_overlap_table")),
-      card(card_header(info_title("Pathway Agreement", "Hallmark pathways with concordant enrichment direction across both datasets.")), DTOutput("compare_pathway_table")),
-      card(card_header(info_title("Shared Claimed Biomarkers", "Biomarkers reported in either study knowledge base that appear in both DEG results.")), DTOutput("compare_biomarker_table"))
+      card(
+        card_header(info_title("Comparison Snapshot", "High-level counts for significant DEGs, overlap, pathway direction agreement, and claimed biomarkers.")),
+        uiOutput("compare_summary_cards")
+      ),
+      layout_columns(
+        card(card_header(info_title("DEG Overlap Direction", "Shared significant genes plotted by log2 fold-change in each dataset. Points in matching quadrants move in the same direction.")), plotOutput("compare_deg_overlap_plot", height = "360px")),
+        card(card_header(info_title("Pathway Agreement", "Shared Hallmark pathways plotted by normalized enrichment score in each dataset. Concordant pathways fall in matching-sign quadrants.")), plotOutput("compare_pathway_plot", height = "360px"))
+      ),
+      card(card_header(info_title("Claimed Biomarker Presence", "Clean claimed biomarkers from either study knowledge base, showing whether each marker appears in each DEG result.")), plotOutput("compare_biomarker_plot", height = "300px"))
     )
   ),
 
@@ -1111,6 +1118,42 @@ server <- function(input, output, session) {
     })
   }, ignoreInit = TRUE)
 
+  observeEvent(input$start_load_demo, {
+    demo_script <- file.path("scripts", "create_compare_demo_datasets.R")
+    if (file.exists(demo_script)) {
+      tryCatch(sys.source(demo_script, envir = new.env(parent = globalenv())), error = function(e) {
+        showNotification(paste("Demo fixture prep skipped:", conditionMessage(e)), type = "warning", duration = 8)
+      })
+    }
+
+    datasets <<- get("available_datasets", mode = "function")("data")
+    dataset_choices <<- active_dataset_choices(datasets)
+    updateSelectInput(session, "dataset_id", choices = dataset_choices, selected = "geo_gse19804")
+    updateSelectInput(session, "compare_dataset_a", choices = dataset_choices, selected = "geo_gse16476")
+    updateSelectInput(session, "compare_dataset_b", choices = dataset_choices, selected = "geo_gse60450")
+    updateTextInput(session, "start_geo_accession", value = "GSE19804")
+
+    kb <- read_study_kb("GSE19804", "data")
+    if (!is.null(kb)) {
+      start_study_kb(kb)
+      start_study_info(study_kb_summary_table(kb))
+      geo_expression_set_status("available from local prepared demo dataset")
+      geo_eset(NULL)
+      geo_count_candidates(geo_supplementary_count_candidates(kb, "GSE19804"))
+      sync_geo_accession("GSE19804", "start")
+      select_assistant_kb("GSE19804")
+      assessment <- reanalysis_assessment_table(kb)
+      proceed <- assessment$Value[assessment$Score == "Proceed recommendation"]
+      start_study_narrative("Local demo loaded. GSE19804 study memory and prepared app dataset are ready; use Validate, Discovery, Compare Studies, and PCA Explorer without live downloads.")
+      start_study_status(paste("Local demo ready. GSE19804 loaded with proceed score", proceed, "/ 100. Compare Studies is preloaded with GSE16476 vs GSE60450."))
+      ai_status(list(status = "Local demo ready", detail = "Prepared GSE19804, GSE16476, and GSE60450 demo datasets are available without live download."))
+      showNotification("Local SeqSurf demo loaded.", type = "message", duration = 6)
+    } else {
+      start_study_status("Demo data folders are present, but GSE19804 study memory was not found.")
+      showNotification("GSE19804 study memory not found in data/ai_knowledge_base.", type = "warning", duration = 8)
+    }
+  }, ignoreInit = TRUE)
+
   observeEvent(input$start_get_study_info, {
     accession <- normalize_geo_accession(input$start_geo_accession)
     notes <- trimws(input$start_own_dataset_notes)
@@ -1294,34 +1337,66 @@ server <- function(input, output, session) {
     datatable(start_study_info(), options = list(pageLength = 12, scrollX = TRUE, dom = "t"), rownames = FALSE)
   })
 
-  output$data_quality_signals_table <- renderDT({
+  output$data_quality_signals_panel <- renderUI({
     kb <- start_study_kb()
-    req(!is.null(kb))
 
     rows <- list()
 
     # RIN score from GEO metadata
-    rin_text <- tryCatch({
-      summary_text <- paste(kb$geo$summary, kb$geo$overall_design, collapse = " ")
-      if (grepl("RIN|RNA integrity", summary_text, ignore.case = TRUE)) {
-        "RIN score mentioned in GEO metadata — review summary for values"
-      } else {
-        "No RIN score detected in GEO metadata"
-      }
-    }, error = function(e) "Unable to check")
-    rows <- c(rows, list(data.frame(Signal = "RNA Integrity (RIN)", Finding = rin_text, Status = ifelse(grepl("mentioned", rin_text), "Present", "Not detected"), stringsAsFactors = FALSE)))
+    if (!is.null(kb)) {
+      rin_text <- tryCatch({
+        summary_text <- paste(kb$geo$summary, kb$geo$overall_design, collapse = " ")
+        if (grepl("RIN|RNA integrity", summary_text, ignore.case = TRUE)) {
+          "RIN score mentioned in GEO metadata"
+        } else {
+          "No RIN score detected in GEO metadata"
+        }
+      }, error = function(e) "Unable to check")
+      rows <- c(rows, list(data.frame(Signal = "RNA integrity", Finding = rin_text, Status = ifelse(grepl("mentioned", rin_text), "Present", "Review"), stringsAsFactors = FALSE)))
 
-    # Sample count
-    n_samples <- if (!is.null(kb$geo$sample_count) && !is.na(kb$geo$sample_count)) kb$geo$sample_count else NA
-    rows <- c(rows, list(data.frame(Signal = "Sample count", Finding = if (!is.na(n_samples)) paste(n_samples, "samples") else "Unknown", Status = if (!is.na(n_samples) && n_samples >= 6) "Sufficient" else "Low / unknown", stringsAsFactors = FALSE)))
+      n_samples <- if (!is.null(kb$geo$sample_count) && !is.na(kb$geo$sample_count)) kb$geo$sample_count else NA
+      rows <- c(rows, list(data.frame(Signal = "Sample count", Finding = if (!is.na(n_samples)) paste(n_samples, "samples") else "Unknown", Status = if (!is.na(n_samples) && n_samples >= 6) "Sufficient" else "Review", stringsAsFactors = FALSE)))
+    } else {
+      rows <- c(rows, list(data.frame(Signal = "Study memory", Finding = "Load local demo or assess a GEO accession", Status = "Pending", stringsAsFactors = FALSE)))
+      rows <- c(rows, list(data.frame(Signal = "Sample count", Finding = "Pending study lookup", Status = "Pending", stringsAsFactors = FALSE)))
+    }
 
-    # Library size / expression set availability
     eset_status <- geo_expression_set_status()
-    rows <- c(rows, list(data.frame(Signal = "Expression matrix", Finding = if (!is.null(eset_status) && nzchar(eset_status)) eset_status else "Not loaded", Status = if (!is.null(eset_status) && grepl("available", eset_status, ignore.case = TRUE)) "Available" else "Not loaded", stringsAsFactors = FALSE)))
+    active_dat <- tryCatch({
+      if (!is.null(input$dataset_id) && nzchar(input$dataset_id)) load_rnaseq_dataset(input$dataset_id, "data") else NULL
+    }, error = function(e) NULL)
 
-    # PCA outlier check — only if expression set loaded
-    eset <- tryCatch(geo_eset(), error = function(e) NULL)
-    if (!is.null(eset) && requireNamespace("Biobase", quietly = TRUE)) {
+    matrix_finding <- if (!is.null(active_dat)) {
+      paste(nrow(active_dat$vsd), "genes x", ncol(active_dat$vsd), "samples")
+    } else if (!is.null(eset_status) && nzchar(eset_status)) {
+      eset_status
+    } else {
+      "Not loaded"
+    }
+    rows <- c(rows, list(data.frame(Signal = "Expression matrix", Finding = matrix_finding, Status = if (!is.null(active_dat) || (!is.null(eset_status) && grepl("available", eset_status, ignore.case = TRUE))) "Available" else "Pending", stringsAsFactors = FALSE)))
+
+    pca_finding <- "Load expression matrix to run PCA check"
+    pca_status <- "Pending"
+    if (!is.null(active_dat) && !is.null(active_dat$pca) && nrow(active_dat$pca) > 2) {
+      pcs <- intersect(c("PC1", "PC2"), names(active_dat$pca))
+      if (length(pcs) >= 2) {
+        scores <- active_dat$pca[, pcs, drop = FALSE]
+        distances <- sqrt(rowSums(scale(scores)^2))
+        outliers <- rownames(scores)[distances > 3]
+        if (length(outliers) == 0) {
+          pca_finding <- "No obvious PC1/PC2 outliers"
+          pca_status <- "Pass"
+        } else {
+          pca_finding <- paste(length(outliers), "potential PCA outlier(s)")
+          pca_status <- "Review"
+        }
+      } else {
+        pca_finding <- "PCA columns unavailable"
+        pca_status <- "Review"
+      }
+    } else {
+      eset <- tryCatch(geo_eset(), error = function(e) NULL)
+      if (!is.null(eset) && requireNamespace("Biobase", quietly = TRUE)) {
       expr <- tryCatch(Biobase::exprs(eset), error = function(e) NULL)
       if (!is.null(expr) && nrow(expr) > 1 && ncol(expr) > 2) {
         pca_result <- tryCatch({
@@ -1336,16 +1411,34 @@ server <- function(input, output, session) {
             list(finding = paste("Potential outliers:", paste(head(outliers, 5), collapse = ", ")), status = "Review")
           }
         }, error = function(e) list(finding = "PCA check failed", status = "Unknown"))
-        rows <- c(rows, list(data.frame(Signal = "PCA outlier screen", Finding = pca_result$finding, Status = pca_result$status, stringsAsFactors = FALSE)))
+          pca_finding <- pca_result$finding
+          pca_status <- pca_result$status
       } else {
-        rows <- c(rows, list(data.frame(Signal = "PCA outlier screen", Finding = "Load expression matrix to run PCA quality check", Status = "Pending", stringsAsFactors = FALSE)))
+          pca_finding <- "Load expression matrix to run PCA check"
+          pca_status <- "Pending"
       }
-    } else {
-      rows <- c(rows, list(data.frame(Signal = "PCA outlier screen", Finding = "Load expression matrix to run PCA quality check", Status = "Pending", stringsAsFactors = FALSE)))
+      }
     }
+    rows <- c(rows, list(data.frame(Signal = "PCA outlier screen", Finding = pca_finding, Status = pca_status, stringsAsFactors = FALSE)))
 
     result <- dplyr::bind_rows(rows)
-    datatable(result, options = list(dom = "t", pageLength = 10, scrollX = TRUE), rownames = FALSE)
+    status_color <- function(status) {
+      if (status %in% c("Pass", "Available", "Sufficient", "Present")) return("#168a50")
+      if (status %in% c("Review", "Unknown")) return("#c47f00")
+      "#667085"
+    }
+    tags$div(
+      style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.65rem;",
+      lapply(seq_len(nrow(result)), function(i) {
+        color <- status_color(result$Status[[i]])
+        tags$div(
+          style = paste0("border: 1px solid #d6dee8; border-left: 5px solid ", color, "; border-radius: 6px; padding: 0.65rem 0.75rem; background: #fbfcfe; min-width: 0;"),
+          tags$div(style = "font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0; font-weight: 800; color: #667085;", result$Signal[[i]]),
+          tags$div(style = "font-weight: 800; color: #17233a; margin-top: 0.2rem;", result$Status[[i]]),
+          tags$div(style = "font-size: 0.86rem; color: #59636e; line-height: 1.25; overflow-wrap: anywhere;", result$Finding[[i]])
+        )
+      })
+    )
   })
 
   output$prior_work_report_table <- renderDT({
@@ -2426,87 +2519,160 @@ server <- function(input, output, session) {
          id_a = input$compare_dataset_a, id_b = input$compare_dataset_b)
   })
 
-  output$compare_deg_overlap_table <- renderDT({
+  comparison_tables <- reactive({
     res <- comparison_results()
     deg_a <- res$deg_a; deg_b <- res$deg_b
-    if (is.null(deg_a) || is.null(deg_b)) return(datatable(data.frame(Message = "DEG results not available for one or both datasets.")))
+
+    empty <- list(
+      summary = data.frame(Metric = character(), Value = numeric(), Detail = character()),
+      deg_overlap = data.frame(),
+      pathway = data.frame(),
+      biomarkers = data.frame(),
+      id_a = res$id_a,
+      id_b = res$id_b
+    )
+
+    if (is.null(deg_a) || is.null(deg_b)) return(empty)
+
     gene_col_a <- intersect(c("gene", "Gene", "gene_symbol", "symbol"), names(deg_a))[1]
     gene_col_b <- intersect(c("gene", "Gene", "gene_symbol", "symbol"), names(deg_b))[1]
     padj_col_a <- intersect(c("padj", "adj.P.Val", "FDR", "qvalue"), names(deg_a))[1]
     padj_col_b <- intersect(c("padj", "adj.P.Val", "FDR", "qvalue"), names(deg_b))[1]
-    if (is.na(gene_col_a) || is.na(gene_col_b)) return(datatable(data.frame(Message = "Gene column not found.")))
-    sig_a <- if (!is.na(padj_col_a)) deg_a[!is.na(deg_a[[padj_col_a]]) & deg_a[[padj_col_a]] < 0.05, gene_col_a] else deg_a[[gene_col_a]]
-    sig_b <- if (!is.na(padj_col_b)) deg_b[!is.na(deg_b[[padj_col_b]]) & deg_b[[padj_col_b]] < 0.05, gene_col_b] else deg_b[[gene_col_b]]
-    overlap <- intersect(sig_a, sig_b)
-    if (length(overlap) == 0) return(datatable(data.frame(Message = "No significant DEG overlap detected.")))
-
     lfc_col_a <- intersect(c("log2FoldChange", "logFC", "log2FC"), names(deg_a))[1]
     lfc_col_b <- intersect(c("log2FoldChange", "logFC", "log2FC"), names(deg_b))[1]
-    cols_a <- c(gene_col_a, if (!is.na(lfc_col_a)) lfc_col_a, if (!is.na(padj_col_a)) padj_col_a)
-    cols_b <- c(gene_col_b, if (!is.na(lfc_col_b)) lfc_col_b, if (!is.na(padj_col_b)) padj_col_b)
-    merge_a <- deg_a[deg_a[[gene_col_a]] %in% overlap, cols_a, drop = FALSE]
-    merge_b <- deg_b[deg_b[[gene_col_b]] %in% overlap, cols_b, drop = FALSE]
-    names(merge_a)[1] <- "Gene"
-    if (ncol(merge_a) > 1) names(merge_a)[2] <- paste0("log2FC_", res$id_a)
-    if (ncol(merge_a) > 2) names(merge_a)[3] <- paste0("padj_", res$id_a)
-    names(merge_b)[1] <- "Gene"
-    if (ncol(merge_b) > 1) names(merge_b)[2] <- paste0("log2FC_", res$id_b)
-    if (ncol(merge_b) > 2) names(merge_b)[3] <- paste0("padj_", res$id_b)
-    result <- merge(merge_a, merge_b, by = "Gene")
-    datatable(result, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE)
-  })
 
-  output$compare_pathway_table <- renderDT({
-    res <- comparison_results()
-    pw_a <- res$pw_a; pw_b <- res$pw_b
-    if (is.null(pw_a) || is.null(pw_b)) return(datatable(data.frame(Message = "Pathway results not available.")))
-    pw_col_a <- intersect(c("pathway", "Pathway", "Description", "Term"), names(pw_a))[1]
-    pw_col_b <- intersect(c("pathway", "Pathway", "Description", "Term"), names(pw_b))[1]
-    nes_col_a <- intersect(c("NES", "nes", "ES"), names(pw_a))[1]
-    nes_col_b <- intersect(c("NES", "nes", "ES"), names(pw_b))[1]
-    if (is.na(pw_col_a) || is.na(pw_col_b)) return(datatable(data.frame(Message = "Pathway column not found.")))
-    shared <- intersect(pw_a[[pw_col_a]], pw_b[[pw_col_b]])
-    if (length(shared) == 0) return(datatable(data.frame(Message = "No shared pathways.")))
-    sub_a <- pw_a[pw_a[[pw_col_a]] %in% shared, c(pw_col_a, if (!is.na(nes_col_a)) nes_col_a else pw_col_a), drop = FALSE]
-    sub_b <- pw_b[pw_b[[pw_col_b]] %in% shared, c(pw_col_b, if (!is.na(nes_col_b)) nes_col_b else pw_col_b), drop = FALSE]
-    names(sub_a) <- c("Pathway", paste0("NES_", res$id_a))
-    names(sub_b) <- c("Pathway", paste0("NES_", res$id_b))
-    result <- merge(sub_a, sub_b, by = "Pathway")
-    nes_a_col <- paste0("NES_", res$id_a); nes_b_col <- paste0("NES_", res$id_b)
-    if (nes_a_col %in% names(result) && nes_b_col %in% names(result)) {
-      a_vals <- suppressWarnings(as.numeric(result[[nes_a_col]]))
-      b_vals <- suppressWarnings(as.numeric(result[[nes_b_col]]))
-      result$Direction <- ifelse(!is.na(a_vals) & !is.na(b_vals) & sign(a_vals) == sign(b_vals), "Concordant", "Discordant")
+    sig_a <- character()
+    sig_b <- character()
+    deg_overlap <- data.frame()
+    if (!is.na(gene_col_a) && !is.na(gene_col_b)) {
+      sig_a <- if (!is.na(padj_col_a)) deg_a[!is.na(deg_a[[padj_col_a]]) & deg_a[[padj_col_a]] < 0.05, gene_col_a] else deg_a[[gene_col_a]]
+      sig_b <- if (!is.na(padj_col_b)) deg_b[!is.na(deg_b[[padj_col_b]]) & deg_b[[padj_col_b]] < 0.05, gene_col_b] else deg_b[[gene_col_b]]
+      overlap <- intersect(sig_a, sig_b)
+      if (length(overlap) > 0 && !is.na(lfc_col_a) && !is.na(lfc_col_b)) {
+        merge_a <- deg_a[deg_a[[gene_col_a]] %in% overlap, c(gene_col_a, lfc_col_a, padj_col_a), drop = FALSE]
+        merge_b <- deg_b[deg_b[[gene_col_b]] %in% overlap, c(gene_col_b, lfc_col_b, padj_col_b), drop = FALSE]
+        names(merge_a) <- c("Gene", "log2FC_A", "padj_A")
+        names(merge_b) <- c("Gene", "log2FC_B", "padj_B")
+        deg_overlap <- merge(merge_a, merge_b, by = "Gene")
+        deg_overlap$Direction <- ifelse(sign(deg_overlap$log2FC_A) == sign(deg_overlap$log2FC_B), "Same direction", "Opposite direction")
+        deg_overlap$Max_abs_log2FC <- pmax(abs(deg_overlap$log2FC_A), abs(deg_overlap$log2FC_B), na.rm = TRUE)
+      }
     }
-    datatable(result, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE)
-  })
 
-  output$compare_biomarker_table <- renderDT({
-    res <- comparison_results()
-    deg_a <- res$deg_a; deg_b <- res$deg_b
-    if (is.null(deg_a) || is.null(deg_b)) return(datatable(data.frame(Message = "DEG results not available.")))
+    pathway <- data.frame()
+    pw_a <- res$pw_a; pw_b <- res$pw_b
+    if (!is.null(pw_a) && !is.null(pw_b)) {
+      pw_col_a <- intersect(c("pathway", "Pathway", "Description", "Term"), names(pw_a))[1]
+      pw_col_b <- intersect(c("pathway", "Pathway", "Description", "Term"), names(pw_b))[1]
+      nes_col_a <- intersect(c("NES", "nes", "ES"), names(pw_a))[1]
+      nes_col_b <- intersect(c("NES", "nes", "ES"), names(pw_b))[1]
+      if (!is.na(pw_col_a) && !is.na(pw_col_b) && !is.na(nes_col_a) && !is.na(nes_col_b)) {
+        shared <- intersect(pw_a[[pw_col_a]], pw_b[[pw_col_b]])
+        if (length(shared) > 0) {
+          sub_a <- pw_a[pw_a[[pw_col_a]] %in% shared, c(pw_col_a, nes_col_a), drop = FALSE]
+          sub_b <- pw_b[pw_b[[pw_col_b]] %in% shared, c(pw_col_b, nes_col_b), drop = FALSE]
+          names(sub_a) <- c("Pathway", "NES_A")
+          names(sub_b) <- c("Pathway", "NES_B")
+          pathway <- merge(sub_a, sub_b, by = "Pathway")
+          pathway$Direction <- ifelse(sign(pathway$NES_A) == sign(pathway$NES_B), "Concordant", "Discordant")
+          pathway$Label <- gsub("^HALLMARK_", "", pathway$Pathway)
+        }
+      }
+    }
 
+    biomarkers <- data.frame()
     kb_a <- tryCatch(read_study_kb(gsub("^geo_", "", res$id_a), "data"), error = function(e) NULL)
     kb_b <- tryCatch(read_study_kb(gsub("^geo_", "", res$id_b), "data"), error = function(e) NULL)
-
     claims_a <- if (!is.null(kb_a)) claim_terms(kb_a, "biomarker") else character()
     claims_b <- if (!is.null(kb_b)) claim_terms(kb_b, "biomarker") else character()
     all_claimed <- union(claims_a, claims_b)
+    if (length(all_claimed) > 0) {
+      biomarkers <- data.frame(
+        Biomarker = rep(all_claimed, each = 4),
+        Layer = rep(c("Claimed in A", "Claimed in B", "DEG in A", "DEG in B"), times = length(all_claimed)),
+        Present = c(rbind(
+          all_claimed %in% claims_a,
+          all_claimed %in% claims_b,
+          all_claimed %in% sig_a,
+          all_claimed %in% sig_b
+        )),
+        stringsAsFactors = FALSE
+      )
+    }
 
-    if (length(all_claimed) == 0) return(datatable(data.frame(Message = "No biomarker claims found in study knowledge bases.")))
-
-    gene_col_a <- intersect(c("gene", "Gene", "gene_symbol"), names(deg_a))[1]
-    gene_col_b <- intersect(c("gene", "Gene", "gene_symbol"), names(deg_b))[1]
-
-    result <- data.frame(
-      Biomarker = all_claimed,
-      Claimed_in_A = all_claimed %in% claims_a,
-      Claimed_in_B = all_claimed %in% claims_b,
-      In_DEG_A = if (!is.na(gene_col_a)) all_claimed %in% deg_a[[gene_col_a]] else NA,
-      In_DEG_B = if (!is.na(gene_col_b)) all_claimed %in% deg_b[[gene_col_b]] else NA,
+    summary <- data.frame(
+      Metric = c("Significant DEGs A", "Significant DEGs B", "Shared DEGs", "Concordant pathways", "Claimed markers seen"),
+      Value = c(length(sig_a), length(sig_b), nrow(deg_overlap), sum(pathway$Direction == "Concordant", na.rm = TRUE), length(unique(biomarkers$Biomarker[biomarkers$Layer %in% c("DEG in A", "DEG in B") & biomarkers$Present]))),
+      Detail = c(res$id_a, res$id_b, "padj < 0.05 in both", "shared Hallmark NES sign", "claimed and detected in either DEG list"),
       stringsAsFactors = FALSE
     )
-    datatable(result, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE)
+
+    list(summary = summary, deg_overlap = deg_overlap, pathway = pathway, biomarkers = biomarkers, id_a = res$id_a, id_b = res$id_b)
+  })
+
+  output$compare_summary_cards <- renderUI({
+    tables <- comparison_tables()
+    if (nrow(tables$summary) == 0) {
+      return(tags$p("Click Compare datasets after selecting two completed reanalysis datasets."))
+    }
+    tags$div(
+      style = "display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: stretch; max-width: 100%;",
+      lapply(seq_len(nrow(tables$summary)), function(i) {
+        tags$div(
+          style = "flex: 1 1 180px; border: 1px solid #d6dee8; border-left: 5px solid #0f8c8f; border-radius: 6px; padding: 0.6rem 0.7rem; background: #f8fbfd; min-width: 160px;",
+          tags$div(style = "font-size: 1.3rem; font-weight: 800; color: #17233a; line-height: 1;", tables$summary$Value[[i]]),
+          tags$div(style = "font-weight: 800; font-size: 0.92rem; line-height: 1.15; margin-top: 0.3rem; overflow-wrap: anywhere;", tables$summary$Metric[[i]]),
+          tags$div(style = "font-size: 0.78rem; color: #667085; line-height: 1.2; margin-top: 0.2rem; overflow-wrap: anywhere;", tables$summary$Detail[[i]])
+        )
+      })
+    )
+  })
+
+  output$compare_deg_overlap_plot <- renderPlot({
+    dat <- comparison_tables()$deg_overlap
+    validate(need(nrow(dat) > 0, "No significant DEG overlap detected for this pair."))
+    label_dat <- dat[order(dat$Max_abs_log2FC, decreasing = TRUE), , drop = FALSE]
+    label_dat <- utils::head(label_dat, 10)
+    ggplot(dat, aes(x = log2FC_A, y = log2FC_B, color = Direction, size = -log10(pmax(padj_A, padj_B)))) +
+      geom_hline(yintercept = 0, color = "#aab2bd", linewidth = 0.4) +
+      geom_vline(xintercept = 0, color = "#aab2bd", linewidth = 0.4) +
+      geom_point(alpha = 0.82) +
+      geom_text(data = label_dat, aes(label = Gene), size = 3, vjust = -0.8, check_overlap = TRUE, show.legend = FALSE) +
+      scale_color_manual(values = c("Same direction" = "#168a50", "Opposite direction" = "#c2410c")) +
+      labs(x = "Dataset A log2FC", y = "Dataset B log2FC", color = NULL, size = "Significance") +
+      theme_minimal(base_size = 13) +
+      theme(legend.position = "bottom")
+  })
+
+  output$compare_pathway_plot <- renderPlot({
+    dat <- comparison_tables()$pathway
+    validate(need(nrow(dat) > 0, "No shared pathway results detected for this pair."))
+    label_dat <- dat[order(abs(dat$NES_A - dat$NES_B), decreasing = TRUE), , drop = FALSE]
+    label_dat <- utils::head(label_dat, 8)
+    ggplot(dat, aes(x = NES_A, y = NES_B, color = Direction)) +
+      geom_hline(yintercept = 0, color = "#aab2bd", linewidth = 0.4) +
+      geom_vline(xintercept = 0, color = "#aab2bd", linewidth = 0.4) +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "#8792a2") +
+      geom_point(size = 4, alpha = 0.86) +
+      geom_text(data = label_dat, aes(label = Label), size = 3, vjust = -0.8, check_overlap = TRUE, show.legend = FALSE) +
+      scale_color_manual(values = c("Concordant" = "#2563eb", "Discordant" = "#c2410c")) +
+      labs(x = "Dataset A NES", y = "Dataset B NES", color = NULL) +
+      theme_minimal(base_size = 13) +
+      theme(legend.position = "bottom")
+  })
+
+  output$compare_biomarker_plot <- renderPlot({
+    dat <- comparison_tables()$biomarkers
+    validate(need(nrow(dat) > 0, "No claimed biomarkers found in the selected study memories."))
+    dat$Layer <- factor(dat$Layer, levels = c("Claimed in A", "Claimed in B", "DEG in A", "DEG in B"))
+    dat$Present_label <- ifelse(dat$Present, "Present", "Absent")
+    ggplot(dat, aes(x = Layer, y = Biomarker, fill = Present_label)) +
+      geom_tile(color = "white", linewidth = 1) +
+      geom_text(aes(label = ifelse(Present, "yes", "")), color = "white", fontface = "bold", size = 3.5) +
+      scale_fill_manual(values = c("Present" = "#0f8c8f", "Absent" = "#d9e2ec")) +
+      labs(x = NULL, y = NULL, fill = NULL) +
+      theme_minimal(base_size = 13) +
+      theme(axis.text.x = element_text(angle = 0, hjust = 0.5), legend.position = "bottom", panel.grid = element_blank())
   })
 
   output$gap_analysis_table <- renderDT({
