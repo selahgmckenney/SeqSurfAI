@@ -252,8 +252,16 @@ get_or_build_study_knowledge_base <- function(accession, extra_papers = "", data
 structured_claim_columns <- function() {
   c(
     "claim_type", "entity", "comparison", "reported_direction",
-    "reported_significance", "evidence_sentence", "source", "confidence"
+    "reported_significance", "evidence_sentence", "source", "confidence", "source_section"
   )
+}
+
+detect_source_section <- function(text) {
+  if (grepl("abstract", text, ignore.case = TRUE)) return("Abstract")
+  if (grepl("method", text, ignore.case = TRUE)) return("Methods")
+  if (grepl("result", text, ignore.case = TRUE)) return("Results")
+  if (grepl("discussion", text, ignore.case = TRUE)) return("Discussion")
+  "Unclassified"
 }
 
 empty_claim_table <- function() {
@@ -283,6 +291,7 @@ extract_structured_claims <- function(text, source = "rule-based extraction") {
   biomarkers <- split_detected_terms(detect_biomarkers(text))
   pathways <- split_detected_terms(detect_terms(text, pathway_dictionary()))
   rows <- list()
+  sec <- detect_source_section(source)
 
   for (gene in biomarkers) {
     rows[[length(rows) + 1]] <- data.frame(
@@ -294,6 +303,7 @@ extract_structured_claims <- function(text, source = "rule-based extraction") {
       evidence_sentence = extract_first_sentence(text),
       source = source,
       confidence = "low",
+      source_section = sec,
       check.names = FALSE
     )
   }
@@ -308,6 +318,7 @@ extract_structured_claims <- function(text, source = "rule-based extraction") {
       evidence_sentence = extract_first_sentence(text),
       source = source,
       confidence = "low",
+      source_section = sec,
       check.names = FALSE
     )
   }

@@ -50,7 +50,7 @@ selected_dataset <- ""
 workflow_story_panel <- function(active = "start") {
   steps <- list(
     start = list(label = "Start", title = "Assess", body = "Enter GEO, score reanalysis value, and decide the route."),
-    train = list(label = "Train", title = "Study Memory", body = "Collect papers, claims, methods, uncertainty, and citations."),
+    train = list(label = "Prepare Evidence", title = "Study Memory", body = "Collect papers, claims, methods, uncertainty, and citations."),
     validate = list(label = "Validate", title = "Reanalyze", body = "Run the app workflow and score paper agreement."),
     discovery = list(label = "Discovery", title = "Next Analyses", body = "Rank follow-up analyses and export a report.")
   )
@@ -325,6 +325,7 @@ ui <- page_navbar(
           card_header(info_title("Can SeqSurf Analyze This In-App?", "First-pass route classifier: processed-matrix in-app analysis, count-matrix path, raw-data handoff, or manual curation.")),
           uiOutput("geo_analyzability_route_summary")
         ),
+        card(card_header(info_title("Data Quality Signals", "RIN score detection, sample count, expression matrix availability, and PCA-based outlier screening to inform whether this dataset is suitable for reanalysis.")), DTOutput("data_quality_signals_table")),
         card(
           card_header(info_title("Dataset Snapshot", "Compact description of the imported study: organism, assay type, sample count, metadata, expression files, and paper context.")),
           uiOutput("start_study_snapshot")
@@ -379,7 +380,7 @@ ui <- page_navbar(
               card(
                 card_header(info_title("Next Actions", "Where to go after study lookup.")),
                 tags$ol(
-                  tags$li("Train study memory from GEO, linked papers, related papers, and any added notes."),
+                  tags$li("Prepare Evidence: collect study memory from GEO, linked papers, related papers, and any added notes."),
                   tags$li("Use Validate to reproduce the paper-style analysis and score agreement with paper claims."),
                   tags$li("Use Discovery to identify better follow-up analyses, interpret surprising results, and inspect PCA, DEG, volcano, heatmap, GSEA, enrichment, and gene-search views.")
                 )
@@ -401,6 +402,17 @@ ui <- page_navbar(
                 card(card_header(info_title("Expression Preview", "First rows and columns from the uploaded expression matrix.")), DTOutput("upload_expr_preview")),
                 card(card_header(info_title("Metadata Preview", "First rows and columns from the uploaded metadata table.")), DTOutput("upload_meta_preview"))
               )
+            ),
+            nav_panel("Count Matrix Import",
+              card(
+                card_header(info_title("Import Count Matrix", "Drop a raw count matrix (genes x samples) and a metadata table to create an app-ready dataset contract without re-downloading from GEO.")),
+                fileInput("count_matrix_file", "Count matrix (CSV, genes as rows)", accept = ".csv"),
+                fileInput("count_metadata_file", "Sample metadata (CSV)", accept = ".csv"),
+                textInput("count_accession_label", "Dataset label (e.g. GSE12345 or my_study)", placeholder = "Used as the dataset ID"),
+                helpText("The count matrix should have a gene symbol or ID column as the first column, then one column per sample. The metadata should have one row per sample with a column matching the count matrix column names."),
+                actionButton("import_count_matrix", "Import and create dataset", icon = icon("upload"), class = "btn-primary"),
+                uiOutput("count_matrix_import_status")
+              )
             )
           )
         )
@@ -409,7 +421,7 @@ ui <- page_navbar(
   ),
 
   nav_panel(
-    "Train",
+    "Prepare Evidence",
     layout_sidebar(
       sidebar = sidebar(
         textInput("assistant_geo", "GEO accession", value = "", placeholder = "Carried from Start, or enter e.g. GSE19804"),
@@ -423,7 +435,7 @@ ui <- page_navbar(
         uiOutput("assistant_action_buttons"),
         uiOutput("assistant_kb_picker"),
         downloadButton("download_paper_to_code", "Export paper-to-code brief"),
-        helpText("Train first. The same study memory is used by Validate and Discovery.")
+        helpText("Prepare Evidence first. The same study memory is used by Validate and Discovery.")
       ),
       tags$div(
         class = "assistant-workspace",
@@ -468,7 +480,7 @@ ui <- page_navbar(
     "Validate",
     layout_sidebar(
       sidebar = sidebar(
-        textInput("geo_import_accession", "GEO accession", value = "", placeholder = "Carried from Train"),
+        textInput("geo_import_accession", "GEO accession", value = "", placeholder = "Carried from Prepare Evidence"),
         uiOutput("geo_import_action_buttons"),
         uiOutput("geo_design_editor"),
         sliderInput("publication_padj", "Publication-check adjusted p-value cutoff", min = 0, max = 0.25, value = 0.1, step = 0.005),
@@ -479,6 +491,7 @@ ui <- page_navbar(
         class = "import-workspace",
         workflow_story_panel("validate"),
         uiOutput("geo_import_workflow_banner"),
+        uiOutput("reproducibility_score_card"),
         tags$div(
           class = "import-tabset",
           navset_tab(
@@ -617,7 +630,7 @@ ui <- page_navbar(
         )
       ),
       card(
-        card_header(info_title("Training Data Export", "Create JSONL examples for future fine-tuning or ranking models from SeqSurf learning events, recommendations, warnings, scores, and signature plans.")),
+        card_header(info_title("Training Data Export", "Export structured learning events — analysis contracts, recommendations, warnings, reproducibility scores, and signature plans — for review or use in retrieval-augmented workflows.")),
         tags$div(
           class = "ai-guide-body",
           checkboxInput("training_include_shared", "Include imported shared learning events", value = TRUE),
@@ -638,6 +651,21 @@ ui <- page_navbar(
           DTOutput("immune_screen_table")
         )
       )
+    )
+  ),
+
+  nav_panel(
+    "Compare Studies",
+    layout_sidebar(
+      sidebar = sidebar(
+        selectInput("compare_dataset_a", "Dataset A", choices = dataset_choices),
+        selectInput("compare_dataset_b", "Dataset B", choices = dataset_choices),
+        actionButton("run_comparison", "Compare datasets", icon = icon("code-compare"), class = "btn-primary"),
+        helpText("Select two datasets that have completed reanalysis to compare DEG overlap, pathway agreement, and claimed biomarkers.")
+      ),
+      card(card_header(info_title("DEG Overlap", "Genes significant in both datasets at padj < 0.05.")), DTOutput("compare_deg_overlap_table")),
+      card(card_header(info_title("Pathway Agreement", "Hallmark pathways with concordant enrichment direction across both datasets.")), DTOutput("compare_pathway_table")),
+      card(card_header(info_title("Shared Claimed Biomarkers", "Biomarkers reported in either study knowledge base that appear in both DEG results.")), DTOutput("compare_biomarker_table"))
     )
   ),
 
@@ -958,7 +986,7 @@ server <- function(input, output, session) {
     kb <- start_study_kb()
     if (is.null(kb) || !is_geo_accession(kb$accession)) return(NULL)
     tagList(
-      actionButton("start_go_train", "Continue to Train", icon = icon("brain"))
+      actionButton("start_go_train", "Continue to Prepare Evidence", icon = icon("brain"))
     )
   })
 
@@ -967,7 +995,7 @@ server <- function(input, output, session) {
     req(kb)
     sync_geo_accession(kb$accession)
     select_assistant_kb(kb$accession)
-    bslib::nav_select("main_nav", selected = "Train", session = session)
+    bslib::nav_select("main_nav", selected = "Prepare Evidence", session = session)
   }, ignoreInit = TRUE)
 
   observeEvent(input$start_go_validate, {
@@ -1020,6 +1048,69 @@ server <- function(input, output, session) {
     showNotification("Uploaded dataset created and selected.", type = "message")
   }, ignoreInit = TRUE)
 
+  observeEvent(input$import_count_matrix, {
+    req(input$count_matrix_file, input$count_metadata_file, nzchar(input$count_accession_label))
+
+    output$count_matrix_import_status <- renderUI(tags$p("Importing...", class = "global-sidebar-note"))
+
+    tryCatch({
+      counts_raw <- read.csv(input$count_matrix_file$datapath, row.names = 1, check.names = FALSE)
+      meta_raw <- read.csv(input$count_metadata_file$datapath, stringsAsFactors = FALSE, check.names = FALSE)
+
+      label <- normalize_geo_accession(gsub("[^A-Za-z0-9_]", "_", input$count_accession_label))
+      dataset_id <- tolower(paste0("cm_", label))
+      dataset_dir <- file.path("data", dataset_id)
+      dir.create(dataset_dir, recursive = TRUE, showWarnings = FALSE)
+
+      # Detect gene column
+      expr <- as.matrix(counts_raw)
+      mode(expr) <- "numeric"
+      expr <- expr[rowSums(is.na(expr)) < ncol(expr), , drop = FALSE]
+
+      # Basic PCA
+      var_genes <- head(order(apply(expr, 1, var, na.rm = TRUE), decreasing = TRUE), min(500, nrow(expr)))
+      pca <- prcomp(t(expr[var_genes, , drop = FALSE]), scale. = TRUE)
+      pca_df <- as.data.frame(pca$x[, 1:min(10, ncol(pca$x)), drop = FALSE])
+      pca_df$sample_id <- rownames(pca_df)
+      pca_variance <- summary(pca)$importance[2, 1:min(10, ncol(pca$x))]
+      pca_loadings <- as.data.frame(pca$rotation[, 1:min(10, ncol(pca$x)), drop = FALSE])
+      pca_loadings$gene <- rownames(pca_loadings)
+
+      # Dataset info
+      dataset_info <- list(
+        dataset_id = dataset_id,
+        label = input$count_accession_label,
+        source = "count_matrix_import",
+        expression_data_type = "raw_counts",
+        sample_id_col = names(meta_raw)[1],
+        group_col = if (ncol(meta_raw) > 1) names(meta_raw)[2] else names(meta_raw)[1],
+        n_genes = nrow(expr),
+        n_samples = ncol(expr),
+        created = Sys.time()
+      )
+
+      saveRDS(as.data.frame(meta_raw), file.path(dataset_dir, "metadata.rds"))
+      saveRDS(expr, file.path(dataset_dir, "vsd_matrix.rds"))
+      saveRDS(pca_df, file.path(dataset_dir, "pca_df.rds"))
+      saveRDS(pca_variance, file.path(dataset_dir, "pca_variance.rds"))
+      saveRDS(pca_loadings, file.path(dataset_dir, "pca_loadings.rds"))
+      saveRDS(dataset_info, file.path(dataset_dir, "dataset_info.rds"))
+      write.csv(data.frame(gene = character(), log2FC = numeric(), pvalue = numeric(), padj = numeric()), file.path(dataset_dir, "deg_results.csv"), row.names = FALSE)
+      write.csv(data.frame(pathway = character(), ES = numeric(), NES = numeric(), pval = numeric()), file.path(dataset_dir, "gsea_hallmark.csv"), row.names = FALSE)
+      write.csv(data.frame(pathway = character(), score = numeric()), file.path(dataset_dir, "pathway_scores.csv"), row.names = FALSE)
+
+      datasets <<- get("available_datasets", mode = "function")("data")
+      dataset_choices <<- active_dataset_choices(datasets)
+      updateSelectInput(session, "dataset_id", choices = dataset_choices, selected = dataset_id)
+
+      output$count_matrix_import_status <- renderUI(
+        tags$p(paste0("Dataset '", dataset_id, "' created with ", nrow(expr), " genes and ", ncol(expr), " samples. Select it in the global sidebar to analyze."), class = "global-sidebar-note")
+      )
+    }, error = function(e) {
+      output$count_matrix_import_status <- renderUI(tags$p(paste("Import failed:", conditionMessage(e)), style = "color:red;"))
+    })
+  }, ignoreInit = TRUE)
+
   observeEvent(input$start_get_study_info, {
     accession <- normalize_geo_accession(input$start_geo_accession)
     notes <- trimws(input$start_own_dataset_notes)
@@ -1056,7 +1147,7 @@ server <- function(input, output, session) {
       start_study_info(study_kb_summary_table(kb))
       assessment <- reanalysis_assessment_table(kb)
       proceed <- assessment$Value[assessment$Score == "Proceed recommendation"]
-      start_study_status(paste("Study info loaded for", accession, ". Proceed recommendation score:", proceed, "/ 100. Send this study to Train or Validate."))
+      start_study_status(paste("Study info loaded for", accession, ". Proceed recommendation score:", proceed, "/ 100. Send this study to Prepare Evidence or Validate."))
       return()
     }
     if (nzchar(notes)) {
@@ -1069,7 +1160,7 @@ server <- function(input, output, session) {
         Value = c("Custom/private dataset", notes),
         check.names = FALSE
       ))
-      start_study_status("Custom dataset notes loaded. Validate automation currently works best for public GEO accessions; use these notes in Train, Discovery, or the paper-to-code brief.")
+      start_study_status("Custom dataset notes loaded. Validate automation currently works best for public GEO accessions; use these notes in Prepare Evidence, Discovery, or the paper-to-code brief.")
       return()
     }
     start_study_status("Enter a valid GEO accession such as GSE16476, or paste custom dataset notes.")
@@ -1201,6 +1292,60 @@ server <- function(input, output, session) {
 
   output$start_study_info_table <- renderDT({
     datatable(start_study_info(), options = list(pageLength = 12, scrollX = TRUE, dom = "t"), rownames = FALSE)
+  })
+
+  output$data_quality_signals_table <- renderDT({
+    kb <- start_study_kb()
+    req(!is.null(kb))
+
+    rows <- list()
+
+    # RIN score from GEO metadata
+    rin_text <- tryCatch({
+      summary_text <- paste(kb$geo$summary, kb$geo$overall_design, collapse = " ")
+      if (grepl("RIN|RNA integrity", summary_text, ignore.case = TRUE)) {
+        "RIN score mentioned in GEO metadata — review summary for values"
+      } else {
+        "No RIN score detected in GEO metadata"
+      }
+    }, error = function(e) "Unable to check")
+    rows <- c(rows, list(data.frame(Signal = "RNA Integrity (RIN)", Finding = rin_text, Status = ifelse(grepl("mentioned", rin_text), "Present", "Not detected"), stringsAsFactors = FALSE)))
+
+    # Sample count
+    n_samples <- if (!is.null(kb$geo$sample_count) && !is.na(kb$geo$sample_count)) kb$geo$sample_count else NA
+    rows <- c(rows, list(data.frame(Signal = "Sample count", Finding = if (!is.na(n_samples)) paste(n_samples, "samples") else "Unknown", Status = if (!is.na(n_samples) && n_samples >= 6) "Sufficient" else "Low / unknown", stringsAsFactors = FALSE)))
+
+    # Library size / expression set availability
+    eset_status <- geo_expression_set_status()
+    rows <- c(rows, list(data.frame(Signal = "Expression matrix", Finding = if (!is.null(eset_status) && nzchar(eset_status)) eset_status else "Not loaded", Status = if (!is.null(eset_status) && grepl("available", eset_status, ignore.case = TRUE)) "Available" else "Not loaded", stringsAsFactors = FALSE)))
+
+    # PCA outlier check — only if expression set loaded
+    eset <- tryCatch(geo_eset(), error = function(e) NULL)
+    if (!is.null(eset) && requireNamespace("Biobase", quietly = TRUE)) {
+      expr <- tryCatch(Biobase::exprs(eset), error = function(e) NULL)
+      if (!is.null(expr) && nrow(expr) > 1 && ncol(expr) > 2) {
+        pca_result <- tryCatch({
+          top_var <- head(order(apply(expr, 1, var, na.rm = TRUE), decreasing = TRUE), 500)
+          pca <- prcomp(t(expr[top_var, , drop = FALSE]), scale. = TRUE)
+          scores <- pca$x[, 1:min(2, ncol(pca$x)), drop = FALSE]
+          distances <- sqrt(rowSums(scale(scores)^2))
+          outliers <- names(distances)[distances > 3]
+          if (length(outliers) == 0) {
+            list(finding = "No obvious outliers detected on PC1/PC2 (z > 3)", status = "Pass")
+          } else {
+            list(finding = paste("Potential outliers:", paste(head(outliers, 5), collapse = ", ")), status = "Review")
+          }
+        }, error = function(e) list(finding = "PCA check failed", status = "Unknown"))
+        rows <- c(rows, list(data.frame(Signal = "PCA outlier screen", Finding = pca_result$finding, Status = pca_result$status, stringsAsFactors = FALSE)))
+      } else {
+        rows <- c(rows, list(data.frame(Signal = "PCA outlier screen", Finding = "Load expression matrix to run PCA quality check", Status = "Pending", stringsAsFactors = FALSE)))
+      }
+    } else {
+      rows <- c(rows, list(data.frame(Signal = "PCA outlier screen", Finding = "Load expression matrix to run PCA quality check", Status = "Pending", stringsAsFactors = FALSE)))
+    }
+
+    result <- dplyr::bind_rows(rows)
+    datatable(result, options = list(dom = "t", pageLength = 10, scrollX = TRUE), rownames = FALSE)
   })
 
   output$prior_work_report_table <- renderDT({
@@ -2062,7 +2207,7 @@ server <- function(input, output, session) {
   output$assistant_claim_candidates_table <- renderDT({
     kb <- selected_kb()
     candidates <- if (is.null(kb)) {
-      data.frame(Claim_candidate = "Train or select a study knowledge base first.", Evidence_type = "Not ready", Status = "Not ready", check.names = FALSE)
+      data.frame(Claim_candidate = "Prepare Evidence or select a study knowledge base first.", Evidence_type = "Not ready", Status = "Not ready", check.names = FALSE)
     } else if (!is.null(kb$claim_candidates) && nrow(kb$claim_candidates) > 0) {
       kb$claim_candidates
     } else {
@@ -2115,7 +2260,7 @@ server <- function(input, output, session) {
   output$dataset_match_warning <- renderUI({
     kb <- selected_kb()
     if (is.null(kb)) {
-      return(tags$div(class = "assistant-hint", tags$strong("Paper/dataset check: "), "Train or select a study knowledge base first."))
+      return(tags$div(class = "assistant-hint", tags$strong("Paper/dataset check: "), "Prepare Evidence or select a study knowledge base first."))
     }
     dat <- dataset()
     matches <- dataset_matches_accession(dat$id, kb$accession, "data")
@@ -2155,6 +2300,42 @@ server <- function(input, output, session) {
     updateTabsetPanel(session, "geo_import_tabset", selected = "Score")
     showNotification("Comparison updated. Review the Score tab for reproducibility and differences.", type = "message", duration = 6)
   }, ignoreInit = TRUE)
+
+  output$reproducibility_score_card <- renderUI({
+    comparison <- tryCatch(publication_comparison(), error = function(e) NULL)
+    if (is.null(comparison) || nrow(comparison) == 0) return(NULL)
+
+    status_col <- intersect(c("Status", "Match", "Outcome", "Result"), names(comparison))[1]
+    if (is.na(status_col)) return(NULL)
+
+    statuses <- comparison[[status_col]]
+    confirmed <- sum(grepl("confirm|support|agree|match", statuses, ignore.case = TRUE))
+    total <- nrow(comparison)
+    pct <- round(100 * confirmed / max(total, 1))
+
+    color <- if (pct >= 60) "#1a7f37" else if (pct >= 30) "#b08800" else "#cf222e"
+
+    tags$div(
+      style = "margin-bottom: 1rem;",
+      card(
+        style = paste0("border-top: 4px solid ", color, ";"),
+        card_body(
+          tags$div(
+            style = "display: flex; align-items: center; gap: 1.5rem;",
+            tags$div(
+              tags$span(style = paste0("font-size: 2.5rem; font-weight: 900; color: ", color, ";"), paste0(pct, "%")),
+              tags$div(style = "font-size: 1rem; font-weight: 700; color: #12263f;", "Reproducibility Score"),
+              tags$div(style = "font-size: 0.85rem; color: #59636e;", paste0(confirmed, " of ", total, " paper claims confirmed in standardized reanalysis"))
+            ),
+            tags$div(
+              style = "flex: 1; font-size: 0.82rem; color: #3b4652; line-height: 1.5;",
+              tags$strong("What this means: "), "Claims are matched by direction of effect and statistical significance. Mismatches may reflect preprocessing differences, cohort subsets, or threshold choices — not necessarily errors."
+            )
+          )
+        )
+      )
+    )
+  })
 
   html_escape <- function(x) {
     x <- as.character(x)
@@ -2219,6 +2400,113 @@ server <- function(input, output, session) {
       options = list(pageLength = 10, scrollX = TRUE),
       rownames = FALSE
     )
+  })
+
+  comparison_results <- eventReactive(input$run_comparison, {
+    req(nzchar(input$compare_dataset_a), nzchar(input$compare_dataset_b))
+    req(input$compare_dataset_a != input$compare_dataset_b)
+
+    load_deg <- function(dataset_id) {
+      path <- file.path("data", dataset_id, "deg_results.csv")
+      if (!file.exists(path)) return(NULL)
+      tryCatch(read.csv(path, stringsAsFactors = FALSE), error = function(e) NULL)
+    }
+    load_pathway <- function(dataset_id) {
+      path <- file.path("data", dataset_id, "gsea_hallmark.csv")
+      if (!file.exists(path)) return(NULL)
+      tryCatch(read.csv(path, stringsAsFactors = FALSE), error = function(e) NULL)
+    }
+
+    deg_a <- load_deg(input$compare_dataset_a)
+    deg_b <- load_deg(input$compare_dataset_b)
+    pw_a  <- load_pathway(input$compare_dataset_a)
+    pw_b  <- load_pathway(input$compare_dataset_b)
+
+    list(deg_a = deg_a, deg_b = deg_b, pw_a = pw_a, pw_b = pw_b,
+         id_a = input$compare_dataset_a, id_b = input$compare_dataset_b)
+  })
+
+  output$compare_deg_overlap_table <- renderDT({
+    res <- comparison_results()
+    deg_a <- res$deg_a; deg_b <- res$deg_b
+    if (is.null(deg_a) || is.null(deg_b)) return(datatable(data.frame(Message = "DEG results not available for one or both datasets.")))
+    gene_col_a <- intersect(c("gene", "Gene", "gene_symbol", "symbol"), names(deg_a))[1]
+    gene_col_b <- intersect(c("gene", "Gene", "gene_symbol", "symbol"), names(deg_b))[1]
+    padj_col_a <- intersect(c("padj", "adj.P.Val", "FDR", "qvalue"), names(deg_a))[1]
+    padj_col_b <- intersect(c("padj", "adj.P.Val", "FDR", "qvalue"), names(deg_b))[1]
+    if (is.na(gene_col_a) || is.na(gene_col_b)) return(datatable(data.frame(Message = "Gene column not found.")))
+    sig_a <- if (!is.na(padj_col_a)) deg_a[!is.na(deg_a[[padj_col_a]]) & deg_a[[padj_col_a]] < 0.05, gene_col_a] else deg_a[[gene_col_a]]
+    sig_b <- if (!is.na(padj_col_b)) deg_b[!is.na(deg_b[[padj_col_b]]) & deg_b[[padj_col_b]] < 0.05, gene_col_b] else deg_b[[gene_col_b]]
+    overlap <- intersect(sig_a, sig_b)
+    if (length(overlap) == 0) return(datatable(data.frame(Message = "No significant DEG overlap detected.")))
+
+    lfc_col_a <- intersect(c("log2FoldChange", "logFC", "log2FC"), names(deg_a))[1]
+    lfc_col_b <- intersect(c("log2FoldChange", "logFC", "log2FC"), names(deg_b))[1]
+    cols_a <- c(gene_col_a, if (!is.na(lfc_col_a)) lfc_col_a, if (!is.na(padj_col_a)) padj_col_a)
+    cols_b <- c(gene_col_b, if (!is.na(lfc_col_b)) lfc_col_b, if (!is.na(padj_col_b)) padj_col_b)
+    merge_a <- deg_a[deg_a[[gene_col_a]] %in% overlap, cols_a, drop = FALSE]
+    merge_b <- deg_b[deg_b[[gene_col_b]] %in% overlap, cols_b, drop = FALSE]
+    names(merge_a)[1] <- "Gene"
+    if (ncol(merge_a) > 1) names(merge_a)[2] <- paste0("log2FC_", res$id_a)
+    if (ncol(merge_a) > 2) names(merge_a)[3] <- paste0("padj_", res$id_a)
+    names(merge_b)[1] <- "Gene"
+    if (ncol(merge_b) > 1) names(merge_b)[2] <- paste0("log2FC_", res$id_b)
+    if (ncol(merge_b) > 2) names(merge_b)[3] <- paste0("padj_", res$id_b)
+    result <- merge(merge_a, merge_b, by = "Gene")
+    datatable(result, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE)
+  })
+
+  output$compare_pathway_table <- renderDT({
+    res <- comparison_results()
+    pw_a <- res$pw_a; pw_b <- res$pw_b
+    if (is.null(pw_a) || is.null(pw_b)) return(datatable(data.frame(Message = "Pathway results not available.")))
+    pw_col_a <- intersect(c("pathway", "Pathway", "Description", "Term"), names(pw_a))[1]
+    pw_col_b <- intersect(c("pathway", "Pathway", "Description", "Term"), names(pw_b))[1]
+    nes_col_a <- intersect(c("NES", "nes", "ES"), names(pw_a))[1]
+    nes_col_b <- intersect(c("NES", "nes", "ES"), names(pw_b))[1]
+    if (is.na(pw_col_a) || is.na(pw_col_b)) return(datatable(data.frame(Message = "Pathway column not found.")))
+    shared <- intersect(pw_a[[pw_col_a]], pw_b[[pw_col_b]])
+    if (length(shared) == 0) return(datatable(data.frame(Message = "No shared pathways.")))
+    sub_a <- pw_a[pw_a[[pw_col_a]] %in% shared, c(pw_col_a, if (!is.na(nes_col_a)) nes_col_a else pw_col_a), drop = FALSE]
+    sub_b <- pw_b[pw_b[[pw_col_b]] %in% shared, c(pw_col_b, if (!is.na(nes_col_b)) nes_col_b else pw_col_b), drop = FALSE]
+    names(sub_a) <- c("Pathway", paste0("NES_", res$id_a))
+    names(sub_b) <- c("Pathway", paste0("NES_", res$id_b))
+    result <- merge(sub_a, sub_b, by = "Pathway")
+    nes_a_col <- paste0("NES_", res$id_a); nes_b_col <- paste0("NES_", res$id_b)
+    if (nes_a_col %in% names(result) && nes_b_col %in% names(result)) {
+      a_vals <- suppressWarnings(as.numeric(result[[nes_a_col]]))
+      b_vals <- suppressWarnings(as.numeric(result[[nes_b_col]]))
+      result$Direction <- ifelse(!is.na(a_vals) & !is.na(b_vals) & sign(a_vals) == sign(b_vals), "Concordant", "Discordant")
+    }
+    datatable(result, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE)
+  })
+
+  output$compare_biomarker_table <- renderDT({
+    res <- comparison_results()
+    deg_a <- res$deg_a; deg_b <- res$deg_b
+    if (is.null(deg_a) || is.null(deg_b)) return(datatable(data.frame(Message = "DEG results not available.")))
+
+    kb_a <- tryCatch(read_study_kb(gsub("^geo_", "", res$id_a), "data"), error = function(e) NULL)
+    kb_b <- tryCatch(read_study_kb(gsub("^geo_", "", res$id_b), "data"), error = function(e) NULL)
+
+    claims_a <- if (!is.null(kb_a)) claim_terms(kb_a, "biomarker") else character()
+    claims_b <- if (!is.null(kb_b)) claim_terms(kb_b, "biomarker") else character()
+    all_claimed <- union(claims_a, claims_b)
+
+    if (length(all_claimed) == 0) return(datatable(data.frame(Message = "No biomarker claims found in study knowledge bases.")))
+
+    gene_col_a <- intersect(c("gene", "Gene", "gene_symbol"), names(deg_a))[1]
+    gene_col_b <- intersect(c("gene", "Gene", "gene_symbol"), names(deg_b))[1]
+
+    result <- data.frame(
+      Biomarker = all_claimed,
+      Claimed_in_A = all_claimed %in% claims_a,
+      Claimed_in_B = all_claimed %in% claims_b,
+      In_DEG_A = if (!is.na(gene_col_a)) all_claimed %in% deg_a[[gene_col_a]] else NA,
+      In_DEG_B = if (!is.na(gene_col_b)) all_claimed %in% deg_b[[gene_col_b]] else NA,
+      stringsAsFactors = FALSE
+    )
+    datatable(result, options = list(pageLength = 15, scrollX = TRUE), rownames = FALSE)
   })
 
   output$gap_analysis_table <- renderDT({
