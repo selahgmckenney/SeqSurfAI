@@ -1,231 +1,206 @@
 # SeqSurf AI
 
-SeqSurf AI is a Shiny prototype for AI-assisted transcriptomic reanalysis.
-It starts from a GEO accession or custom study notes, builds study context from
-GEO/PubMed, PubMed papers that mention the GEO accession, and optional paper
-text, proposes a reproducible analysis design, writes an app-ready dataset, and
-then lets the user explore and verify results.
+[![R](https://img.shields.io/badge/R-Shiny-276DC3)](https://shiny.posit.co/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/selahgmckenney/SeqSurfAI?include_prereleases)](https://github.com/selahgmckenney/SeqSurfAI/releases)
+[![Status](https://img.shields.io/badge/status-research%20prototype-blue)](#current-scope)
 
-This app is intentionally separate from `RNAseq_Shiny_App/`, which remains the
-research dashboard for existing osteosarcoma, neuroblastoma, and ANBL datasets.
+**SeqSurf AI is a Shiny application for paper-grounded transcriptomic reanalysis.**
+It helps researchers start from a GEO accession, understand what has already
+been done with a public dataset, classify whether reanalysis is feasible,
+validate app results against publication claims, and identify scientifically
+useful next analyses.
 
-## What SeqSurf Does
+Public transcriptomic datasets are reused constantly, but conclusions are often
+difficult to compare because preprocessing choices, phenotype definitions,
+contrasts, and validation standards vary across studies. SeqSurf AI is designed
+as a reproducibility layer between public repositories, papers, and exploratory
+bioinformatics workflows.
 
-SeqSurf is designed to answer four questions before and after reanalysis:
+![SeqSurf AI interface](docs/screenshots/00_current_app_view.png)
 
-1. Can this public dataset be analyzed in the app?
-2. What has already been done with this dataset?
-3. How well does a public reanalysis reproduce or approximate the paper?
-4. What should be analyzed next?
+## Why This Exists
 
-For studies that cannot run fully inside Shiny, SeqSurf exports a reproducible
-external workflow bundle and a no-code AI prompt so a user can ask Claude Code,
-Codex, Positron Assistant, or another coding assistant to run the raw/count
-workflow and return import-ready files.
+| Problem | SeqSurf AI response |
+|---|---|
+| Public GEO studies are reused inconsistently. | Classifies each dataset into an analyzable route before reanalysis. |
+| AI tools can summarize papers but do not enforce analysis contracts. | Connects GEO metadata, paper claims, methods, app results, and reproducibility scores. |
+| Exact reproduction is often impossible from public files alone. | Separates exact reproduction, paper-style approximation, count-matrix import, and raw/SRA handoff. |
+| Reanalysis value is hard to judge up front. | Scores data availability, reproducibility potential, usefulness, novelty, and technical risk. |
+| Cross-study comparison is usually manual. | Provides visual comparison of DEG overlap, pathway agreement, and claimed biomarkers across prepared studies. |
 
-## Product Workflow
+## Core Capabilities
 
-1. Start
-   - Enter a GEO accession or paste custom/private dataset notes.
-   - Retrieve GEO/PubMed study context.
-   - Review what has already been done, detected methods/results, prior reuse
-     clues, limitations, exact-reproduction feasibility, and raw/supplementary
-     file triage.
-   - Classify whether the study can run in-app, needs a count-matrix pipeline,
-     needs a raw sequencing pipeline, or requires manual curation.
-   - Send the study to Prepare Evidence or Validate.
+SeqSurf AI currently supports:
 
-2. Prepare Evidence
-   - Build study memory from GEO/PubMed, related papers mentioning the GEO
-     accession, and optional user-provided text.
-   - Fetch paper-like PDFs/HTML when available.
-   - Extract structured publication claims from the study context.
-   - Export a paper-to-code brief.
+- **GEO triage:** enter a GEO accession and classify the study as in-app
+  processed-matrix reanalysis, count-matrix workflow, raw/SRA handoff, or manual
+  curation.
+- **Study memory:** build local study context from GEO, PubMed, related papers,
+  optional notes, and extracted claims.
+- **Paper-aware scoring:** estimate whether reanalysis is useful before spending
+  time on deeper analysis.
+- **Processed-matrix validation:** generate or load an app-ready dataset
+  contract with metadata, expression matrix, PCA, DEG results, GSEA/pathway
+  summaries, and report files.
+- **Publication claim comparison:** compare paper-reported biomarkers and
+  pathways with app DEG/GSEA results.
+- **Reproducibility score:** summarize supported, weak, missing, and
+  direction-mismatched claims.
+- **Discovery recommendations:** rank next analyses using metadata, DEG/GSEA
+  signals, paper agreement, and learned local feedback.
+- **Compare Studies:** visually compare prepared studies by DEG overlap,
+  pathway direction agreement, and shared claimed biomarkers.
+- **External workflow handoff:** export raw/SRA or count-matrix plans for
+  Positron, Codex, Claude Code, or another coding assistant.
+- **Learning export:** save local feedback and export structured examples for
+  future SeqSurf-specific model development.
 
-3. Validate
-   - Fetch a GEO ExpressionSet when a processed series matrix is available.
-   - Propose a primary contrast and analysis design.
-   - Run PCA, DEG, GSEA, and pathway-score generation.
-   - Write the app dataset contract under `data/geo_<accession>/`.
-   - Verify whether the imported dataset matches the trained GEO accession.
-   - Compare reproduced DEG/GSEA results against paper claims.
-   - Score post-analysis reproducibility from supported, weak, missing, and
-     direction-mismatched claims.
+## App Workflow
 
-4. Discovery
-   - Rank next analyses using the active dataset, DEG/GSEA results, metadata,
-     trained study memory, and paper-agreement status.
-   - Triage reproduced findings, divergent findings, weak/missing claims, and
-     high-signal new DEG/pathway results.
-   - Report gaps, suggested comparisons, and follow-up analysis ideas.
-   - Explore dataset overview, PCA, top loading genes, DEG, volcano, heatmap,
-     GSEA, Enrichr, clusterProfiler, and gene search.
+1. **Start**
+   - Enter a GEO accession or load the local demo.
+   - Review data quality signals, analyzability route, prior work, and
+     reanalysis scores.
 
-The paper-to-code brief is designed for Claude Code, Codex, or another coding
-agent. It includes section-aware paper excerpts, the analyzability route,
-exact-method feasibility, raw/supplementary triage, required app-contract files,
-and acceptance criteria for generated analysis scripts.
+2. **Prepare Evidence**
+   - Build study memory from GEO/PubMed and optional paper or method notes.
+   - Extract structured claims, methods, and citation evidence.
 
-6. No-code external handoff
-   - Download the raw/SRA workflow bundle.
-   - Download the no-code AI guide and AI assistant prompt.
-   - Run the external workflow with help from an AI coding assistant.
-   - Upload `outputs/seqsurf_gene_counts.csv` and
-     `outputs/seqsurf_metadata.csv` back into SeqSurf.
+3. **Validate**
+   - Fetch or load a prepared dataset.
+   - Propose a contrast, run/reuse PCA, DEG, GSEA, pathway scores, and report
+     generation.
+   - Compare results to publication claims and calculate a reproducibility score.
 
-5. Upload mode on Start
-   - Upload an expression matrix and metadata table from the Start page.
-   - Map gene, sample, group, patient, and display columns.
-   - Create an app-ready dataset contract for PCA, DEG, volcano, heatmap, and
-     gene-level exploration.
-   - Uploaded DEG currently uses a simple Welch t-test baseline suitable for
-     demos/prototypes; publishable analyses should replace this with a
-     study-appropriate model.
+4. **Discovery**
+   - Identify relevant, different, weak, missing, and high-signal results.
+   - Surface sequencing pitfalls and standardized signature checks.
+   - Save feedback so future recommendations can adapt locally.
 
-## Current Scope
+5. **Compare Studies**
+   - Compare two completed app-contract datasets.
+   - View DEG overlap direction, pathway NES agreement, and claimed biomarker
+     presence as figures rather than tables.
 
-The app currently works best for GEO studies that expose a usable processed
-series-matrix expression table through `GEOquery::getGEO(..., GSEMatrix = TRUE)`.
-Raw FASTQ/count-matrix reconstruction is handled as a triage and pipeline-handoff
-plan rather than an in-Shiny FASTQ workflow. The upload workflow supports
-app-ready expression matrices plus metadata.
+## Quick Start
 
-SeqSurf AI includes an analyzability classifier so the app can say whether a GEO
-study is currently suitable for in-app processed-matrix reanalysis, partially
-supported through a count-matrix workflow, or outside the Shiny runtime because
-it requires raw FASTQ/SRA/BAM-style processing.
+Clone the repository:
 
-The first version of the scoring layer separates:
-
-- reanalysis usefulness score
-- data availability score
-- reproducibility score
-- novelty/opportunity score
-- technical risk score
-
-These scores are deterministic heuristics from GEO/PubMed metadata, extracted
-paper methods/findings, optional user-provided paper notes, sample count,
-supplementary-file availability, reported claims, and platform/method language.
-
-The Start page also includes an optional LLM narrative layer. When an OpenAI API
-key is available, the app can write a concise scientist-facing interpretation of
-what has already been done with the dataset, whether reanalysis is worth doing,
-what to reproduce first, what modern follow-up analysis is most promising, and
-what manual checks are needed before proceeding.
-
-## Run
-
-From this folder:
-
-```r
-shiny::runApp()
+```bash
+git clone https://github.com/selahgmckenney/SeqSurfAI.git
+cd SeqSurfAI
 ```
 
-Or navigate to the cloned directory first:
+Install core R packages:
 
 ```r
-setwd("path/to/SeqSurf_AI")
-shiny::runApp()
+install.packages(c(
+  "shiny", "bslib", "ggplot2", "dplyr", "tidyr", "DT",
+  "plotly", "pheatmap", "httr2", "jsonlite"
+))
 ```
 
-Recommended local run:
+Run the app:
 
 ```r
 shiny::runApp(host = "127.0.0.1", port = 4248)
 ```
 
-## Optional Dependencies
+Optional Bioconductor/GEO features use packages such as `GEOquery`, `Biobase`,
+`limma`, `edgeR`, `fgsea`, `msigdbr`, `AnnotationDbi`, and `org.Hs.eg.db`.
 
-Core app packages are checked at startup. GEO/AI features also benefit from:
+## Fast Local Demo
 
-- `GEOquery`
-- `Biobase`
-- `rentrez`
-- `pdftools`
-- `httr2`
-- `jsonlite`
-- `limma`
-- `edgeR`
-- `matrixStats`
-- `fgsea`
-- `msigdbr`
-- `survival`
-- `immunedeconv`
-- `commonmark`
+For a presentation, use the built-in demo path:
 
-OpenAI-backed extraction/chat requires an API key pasted into the app or set as
-`OPENAI_API_KEY`. In the app, paste the key once in the global sidebar and click
-`Save key for session`; SeqSurf AI keeps it in Shiny session memory for Start,
-Prepare Evidence, Validate, and Discovery actions. The key is not written to
-project files.
+1. Open the app.
+2. Go to **Start**.
+3. Click **Load local demo**.
+4. Show **Data Quality Signals**, analyzability route, and the study snapshot.
+5. Move to **Validate**, **Discovery**, **PCA Explorer**, and **Compare Studies**.
 
-## Installation Notes
+The local demo is designed to avoid slow live downloads. It prepares:
 
-For a clean demo machine, install R first from CRAN:
+- `GSE19804` as the primary processed-matrix demo.
+- `GSE16476` and `GSE60450` as lightweight comparison fixtures for the
+  **Compare Studies** tab.
 
-- https://cran.r-project.org/
+The comparison fixtures can also be recreated directly:
 
-Then install an IDE. Positron is a good choice for users who want an AI-assisted
-R/Python workflow:
-
-- https://positron.posit.co/download.html
-
-For no-code external workflow help, use an AI coding assistant that can inspect a
-folder and run terminal/R commands. SeqSurf exports prompts for Claude Code,
-Codex, Positron Assistant, or similar tools.
+```r
+source("scripts/create_compare_demo_datasets.R")
+```
 
 ## Dataset Contract
 
-Imported or uploaded datasets should live under `data/<dataset_id>/` and contain:
+Imported or uploaded datasets live under `data/<dataset_id>/` and follow a
+standard app contract:
 
-- `metadata.rds`
-- `vsd_matrix.rds`
-- `pca_df.rds`
-- `pca_variance.rds`
-- `pca_loadings.rds`
-- `deg_results.csv`
-- `gsea_hallmark.csv`
-- `pathway_scores.csv`
-- `dataset_info.rds`
+```text
+metadata.rds
+vsd_matrix.rds
+pca_df.rds
+pca_variance.rds
+pca_loadings.rds
+deg_results.csv
+gsea_hallmark.csv
+pathway_scores.csv
+dataset_info.rds
+```
 
-The expression matrix should have genes as rows and sample IDs as columns.
-`metadata.rds` should include the sample ID column named in `dataset_info.rds`.
+This contract allows the same PCA, DEG, volcano, heatmap, GSEA, gene search,
+paper-agreement, discovery, and cross-study comparison views to work across
+different studies.
 
-## Relationship To The Original App
+## AI And Privacy Notes
 
-`RNAseq_Shiny_App/` keeps the existing precomputed research datasets and
-dataset-specific study pages. `SeqSurf_AI/` starts clean, with no bundled
-personal datasets, so it can become the general GEO/upload reanalysis product.
+OpenAI-backed extraction and chat are optional. If an API key is provided, it is
+held in Shiny session memory and is not written to project files. Local learning
+logs, generated workflow folders, downloaded papers, and app-generated GEO data
+are ignored by git by default.
 
-## Demo Notes
+Shared learning export is opt-in and intended to omit GEO accession, dataset ID,
+raw data, paper text, and free-text notes.
 
-For a demo or abstract, present automated GEO import as strongest for processed
-series-matrix datasets. For raw/count-only studies, use the raw/supplementary
-triage and paper-to-code brief as the honest handoff into a reproducible external
-pipeline, then load the resulting app contract back into SeqSurf AI.
+## Current Scope
 
-Recommended demo materials:
+SeqSurf AI is a research prototype. It is strongest for GEO studies with usable
+processed series-matrix expression data. Raw FASTQ/SRA processing is not run
+inside Shiny; instead, SeqSurf AI exports workflow plans and handoff prompts so
+external tools can generate import-ready files.
 
-- `docs/presentation_demo_script.md`
-- `docs/demo_walkthrough_GSE19804.md`
-- `docs/demo_dataset_matrix.md`
+Current limitations:
 
-Recommended live demo accession:
+- Exact paper reproduction depends on public file completeness and method detail.
+- Full-text/PDF extraction is section-aware but not perfect for every article.
+- Upload-mode DEG uses a simple prototype baseline and should be replaced with a
+  study-appropriate model for publication-grade analysis.
+- Shared/global learning is file-based; a consent-aware backend is future work.
+- The SeqSurf-specific ML model is planned, but this repository currently exports
+  structured training examples rather than fine-tuning a model in-app.
 
-- `GSE19804`
+## Documentation
 
-Route examples:
+- [Demo walkthrough: GSE19804](docs/demo_walkthrough_GSE19804.md)
+- [Demo dataset matrix](docs/demo_dataset_matrix.md)
+- [Presentation demo script](docs/presentation_demo_script.md)
+- [Healthcare AI overview](docs/SeqSurf_AI.qmd)
 
-- Processed matrix: `GSE19804`
-- Count-matrix path: `GSE60450`
-- Raw/SRA handoff: `GSE16476`
+## Citation
 
-## Current Limitations
+If you use SeqSurf AI, cite the repository release used for your analysis.
 
-- Full-text/PDF extraction is section-aware but not perfect for every PDF layout.
-- Exact paper reproduction is only possible when public files and methods are
-  sufficiently complete.
-- Raw FASTQ/SRA processing is intentionally exported as an external workflow
-  bundle instead of running inside Shiny.
-- PaperQA support currently prepares a corpus/manifest; full citation-grounded
-  chat remains a future integration target.
+```text
+McKenney S. SeqSurf AI: paper-grounded transcriptomic reanalysis for GEO
+dataset triage, claim validation, reproducibility scoring, and adaptive
+learning. GitHub: https://github.com/selahgmckenney/SeqSurfAI
+```
+
+For manuscript text:
+
+```text
+Source code for SeqSurf AI is available at
+https://github.com/selahgmckenney/SeqSurfAI.
+```
+
