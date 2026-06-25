@@ -17,6 +17,8 @@ contrasts, and validation standards vary across studies. SeqSurf AI is designed
 as a reproducibility layer between public repositories, papers, and exploratory
 bioinformatics workflows.
 
+![SeqSurf AI app demo workflow](docs/screenshots/seqsurf_app_demo_workflow.png)
+
 ## Why This Exists
 
 | Problem | SeqSurf AI response |
